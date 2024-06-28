@@ -45,20 +45,20 @@ func main() {
 
     UpdateField(db)
 
-	// // Index movies into MeiliSearch
-	// err = indexMovies(movies)
-	// if err != nil {
-	// 	log.Fatalf("Error indexing movies: %v", err)
-	// }
+	// Index movies into MeiliSearch
+	err = indexMovies(movies)
+	if err != nil {
+		log.Fatalf("Error indexing movies: %v", err)
+	}
 
-	// // Perform a search in MeiliSearch
-	// searchQuery := "Drama"
-	// searchResponse, err := searchMovies(searchQuery)
-	// if err != nil {
-	// 	log.Fatalf("Error searching movies: %v", err)
-	// }
+	// Perform a search in MeiliSearch
+	searchQuery := "Drama"
+	searchResponse, err := searchMovies(searchQuery)
+	if err != nil {
+		log.Fatalf("Error searching movies: %v", err)
+	}
 
-	// fmt.Printf("Search Response: %+v\n", searchResponse)
+	fmt.Printf("Search Response: %+v\n", searchResponse)
 }
 
 func UpdateField(db *gorm.DB) {
