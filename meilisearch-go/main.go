@@ -8,6 +8,7 @@ import (
     "io/ioutil"
     "strings"
     "encoding/json"
+	"time"
 
     "gorm.io/driver/postgres"
     "gorm.io/gorm"
@@ -25,30 +26,74 @@ const (
     indexName      = "movies"  
 )
 
+
 func main() {
 	// Connect to PostgreSQL database
-	dsn := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		"localhost", 5421, "myuser", "mypassword", "mydatabase")
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", "localhost", 5421, "myuser", "mypassword", "mydatabase")
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect to database")
 	}
 
-    // for _, movie := range movies {
-    //     db.Create(&movie)
-    // }
+	// for _, movie := range movies {
+	// 	    db.Create(&movie)
+	// 	}
+
+	// if err := deleteAllMoviesFromMeiliSearch(); err != nil {
+	// 	log.Fatalf("failed to delete all movies from MeiliSearch: %v", err)
+	// }
 
 	// Migrate the Movie schema
 	db.AutoMigrate(&Movie{})
 	fmt.Println("Database migration completed!")
 
-    UpdateField(db)
+	// Fetch movies from PostgreSQL
+	var movies []Movie
+	if err := db.Find(&movies).Error; err != nil {
+		log.Fatalf("Error fetching movies from database: %v", err)
+	}
+	fmt.Printf("Fetched %d movies from PostgreSQL\n", len(movies))
+
+	for _, movie := range movies {
+		fmt.Printf("Movie ID: %d, Title: %s, Genres: %v\n", movie.ID, movie.Title, movie.Genres)
+	}
+
+	// Create index if it doesn't exist
+	indexExists, err := checkIndexExists()
+	if err != nil {
+		log.Fatalf("Error checking if index exists: %v", err)
+	}
+
+	if !indexExists {
+		taskUID, err := createIndex()
+		if err != nil {
+			log.Fatalf("Error creating index: %v", err)
+		}
+
+		// Wait for the index creation task to complete
+		err = waitForTask(taskUID)
+		if err != nil {
+			log.Fatalf("Error waiting for index creation task: %v", err)
+		}
+	} else {
+		fmt.Println("Index already exists, skipping index creation")
+	}
+
+	// movieID := uint(1) // The ID of the movie to delete
+	// if err := deleteMovie(db, movieID); err != nil {
+	// 	log.Fatalf("Error deleting movie: %v", err)
+	// }
 
 	// Index movies into MeiliSearch
-	err = indexMovies(movies)
+	taskUID, err := indexMovies(movies)
 	if err != nil {
 		log.Fatalf("Error indexing movies: %v", err)
+	}
+
+	// Wait for the indexing task to complete
+	err = waitForTask(taskUID)
+	if err != nil {
+		log.Fatalf("Error waiting for indexing task: %v", err)
 	}
 
 	// Perform a search in MeiliSearch
@@ -58,30 +103,105 @@ func main() {
 		log.Fatalf("Error searching movies: %v", err)
 	}
 
-	fmt.Printf("Search Response: %+v\n", searchResponse)
+	fmt.Printf("Search Response: %+v\n", string(searchResponse))
 }
 
-func UpdateField(db *gorm.DB) {
-    for _, movie := range movies {
-        var existingMovie Movie
-        result := db.First(&existingMovie, movie.ID)
-        if result.Error == nil {
-            fmt.Printf("Movie '%s' already exists in the database\n", movie.Title)
-        } else if result.Error == gorm.ErrRecordNotFound {
-            if err := db.Create(&movie).Error; err != nil {
-                log.Fatalf("Error creating movie record: %v", err)
-            }
-            fmt.Printf("Movie '%s' created successfully\n", movie.Title)
-        } else {
-            log.Fatalf("Error checking movie record: %v", result.Error)
-        }
-    }
+func checkIndexExists() (bool, error) {
+	url := fmt.Sprintf("%s/indexes/%s", meiliSearchURL, indexName)
 
-    fmt.Println("Data insertion completed!")
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	} else if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	} else {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return false, fmt.Errorf("unexpected response status: %s, body: %s", resp.Status, string(body))
+	}
 }
 
-// Function to index movies into MeiliSearch
-func indexMovies(movies []Movie) error {
+func createIndex() (int64, error) {
+	url := fmt.Sprintf("%s/indexes", meiliSearchURL)
+	payload := fmt.Sprintf(`{"uid": "%s"}`, indexName)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
+	if err != nil {
+		return 0, fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return 0, fmt.Errorf("unexpected response status: %s, body: %s", resp.Status, string(body))
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	var response map[string]interface{}
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return 0, fmt.Errorf("error unmarshaling response: %v", err)
+	}
+
+	taskUID, ok := response["taskUid"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("task UID not found in response")
+	}
+
+	fmt.Println("Index creation task enqueued successfully")
+	return int64(taskUID), nil
+}
+
+func deleteAllMoviesFromMeiliSearch() error {
+	url := fmt.Sprintf("%s/indexes/%s/documents", meiliSearchURL, indexName)
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("error creating request: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return fmt.Errorf("unexpected response status: %s, body: %s", resp.Status, string(body))
+	}
+
+	fmt.Println("All movies deleted from MeiliSearch successfully")
+	return nil
+}
+
+
+func indexMovies(movies []Movie) (int64, error) {
 	url := fmt.Sprintf("%s/indexes/%s/documents", meiliSearchURL, indexName)
 
 	// Prepare documents to send
@@ -90,7 +210,7 @@ func indexMovies(movies []Movie) error {
 		doc := map[string]interface{}{
 			"id":     movie.ID,
 			"title":  movie.Title,
-			"genres": movie.Genres,
+			"genres": []string(movie.Genres),
 		}
 		documents = append(documents, doc)
 	}
@@ -98,35 +218,96 @@ func indexMovies(movies []Movie) error {
 	// Convert documents to JSON
 	payload, err := json.Marshal(documents)
 	if err != nil {
-		return fmt.Errorf("error marshaling documents: %v", err)
+		return 0, fmt.Errorf("error marshaling documents: %v", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(payload)))
 	if err != nil {
-		return fmt.Errorf("error creating request: %v", err)
+		return 0, fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Meili-API-Key", apiKey)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
 	// Send HTTP request
 	client := http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("error sending request: %v", err)
+		return 0, fmt.Errorf("error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected response status: %s", resp.Status)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		body, _ := ioutil.ReadAll(resp.Body)
+		return 0, fmt.Errorf("unexpected response status: %s, body: %s", resp.Status, string(body))
 	}
 
-	fmt.Println("Movies indexed successfully")
-	return nil
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	var response map[string]interface{}
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return 0, fmt.Errorf("error unmarshaling response: %v", err)
+	}
+
+	taskUID, ok := response["taskUid"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("task UID not found in response")
+	}
+
+	fmt.Println("Indexing task enqueued successfully")
+	return int64(taskUID), nil
 }
 
-// Function to search movies in MeiliSearch
+func waitForTask(taskUID int64) error {
+	url := fmt.Sprintf("%s/tasks/%d", meiliSearchURL, taskUID)
+
+	for {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return fmt.Errorf("error creating request: %v", err)
+		}
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+		client := http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("error sending request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("error reading response body: %v", err)
+		}
+
+		var response map[string]interface{}
+		err = json.Unmarshal(body, &response)
+		if err != nil {
+			return fmt.Errorf("error unmarshaling response: %v", err)
+		}
+
+		status, ok := response["status"].(string)
+		if !ok {
+			return fmt.Errorf("status not found in response")
+		}
+
+		if status == "succeeded" {
+			fmt.Printf("Task %d completed successfully\n", taskUID)
+			return nil
+		} else if status == "failed" {
+			taskError, _ := json.Marshal(response)
+			return fmt.Errorf("task %d failed, details: %s", taskUID, string(taskError))
+		}
+
+		time.Sleep(1 * time.Second) // Wait before checking again
+	}
+}
+
 func searchMovies(query string) ([]byte, error) {
 	url := fmt.Sprintf("%s/indexes/%s/search?q=%s", meiliSearchURL, indexName, query)
 
@@ -135,7 +316,7 @@ func searchMovies(query string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
-	req.Header.Set("X-Meili-API-Key", apiKey)
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
 	// Send HTTP request
 	client := http.Client{}

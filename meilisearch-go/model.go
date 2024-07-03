@@ -50,6 +50,15 @@ var movies = []Movie{
     {ID: 23, Title: "Back to the Future", Genres: pq.StringArray{"Adventure", "Comedy", "Sci-Fi"}},
     {ID: 24, Title: "The Terminator", Genres: pq.StringArray{"Action", "Sci-Fi"}},
     {ID: 25, Title: "Die Hard", Genres: pq.StringArray{"Action", "Thriller"}},
+	{ID: 26, Title: "The Lion King", Genres: pq.StringArray{"Animation", "Adventure", "Drama"}},
+    {ID: 27, Title: "Back to the Future", Genres: pq.StringArray{"Adventure", "Comedy", "Sci-Fi"}},
+    {ID: 28, Title: "The Terminator", Genres: pq.StringArray{"Action", "Sci-Fi"}},
+    {ID: 29, Title: "Die Hard", Genres: pq.StringArray{"Action", "Thriller"}},
+	{ID: 30, Title: "The Lion King", Genres: pq.StringArray{"Animation", "Adventure", "Drama"}},
+    {ID: 31, Title: "Back to the Future", Genres: pq.StringArray{"Adventure", "Comedy", "Sci-Fi"}},
+    {ID: 32, Title: "The Terminator", Genres: pq.StringArray{"Action", "Sci-Fi"}},
+	{ID: 33, Title: "Back to the Future", Genres: pq.StringArray{"Adventure", "Comedy", "Sci-Fi"}},
+
 }
 
 // type Client struct {

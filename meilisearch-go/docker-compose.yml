@@ -8,11 +8,24 @@ services:
       POSTGRES_DB: mydatabase
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: 
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+      - -c
+      - listen_addresses=*
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5421:5432"
     restart: unless-stopped
+    networks:
+      - my-network
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -25,6 +38,48 @@ services:
     depends_on:
       - postgres
     restart: unless-stopped
+    networks:
+      - my-network
+
+  # package:
+  #   build: .
+  #   tty: true
+  #   stdin_open: true
+  #   working_dir: /home/package
+  #   environment:
+  #     - MEILISEARCH_URL=http://meilisearch:7700
+  #   depends_on:
+  #     - meilisearch
+  #   links:
+  #     - meilisearch
+  #   volumes:
+  #     - gopkg:/go/pkg/mod
+  #     - ./:/home/package
+  #   networks:
+  #     - my-network
+
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_MASTER_KEY=masterKey
+      - MEILI_NO_ANALYTICS=true
+    networks:
+      - my-network
+
+  meilisync:
+    platform: linux/x86_64
+    image: long2ice/meilisync
+    volumes:
+      - ./config.yml:/meilisync/config.yml
+    networks:
+      - my-network
 
 volumes:
   postgres_data:
+  gopkg:
+
+networks:
+  my-network:
+    driver: bridge

@@ -1,0 +1,116 @@
+plugins:
+  - meilisync.plugin.Plugin
+progress:
+  type: file
+meilisearch:
+  api_url: http://meilisearch:7700/
+  api_key: 'masterKey'
+  insert_size: 1000
+  insert_interval: 10
+
+sync:
+  - schema: public
+    table: SubCategory
+    primary_key: id
+    index: subcategory_index
+    transform:
+      - from: Sub_topic
+        to: sub_topic
+      - from: description
+        to: description
+      - from: categoryId
+        to: category_id
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+  - schema: public
+    table: Category
+    primary_key: id
+    index: category_index
+    transform:
+      - from: topic
+        to: topic
+      - from: description
+        to: description
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+  - schema: public
+    table: Blog
+    primary_key: id
+    index: blog_index
+    transform:
+      - from: title
+        to: title
+      - from: content
+        to: content
+      - from: published
+        to: published
+      - from: author
+        to: author
+      - from: categoryId
+        to: category_id
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+  - schema: public
+    table: message_tags
+    primary_key: id
+    index: message_tags_index
+    transform:
+      - from: messageId
+        to: message_id
+      - from: tagId
+        to: tag_id
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+  - schema: public
+    table: message
+    primary_key: id
+    index: message_index
+    transform:
+      - from: sentense
+        to: sentence
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+  - schema: public
+    table: tags
+    primary_key: id
+    index: tags_index
+    transform:
+      - from: keyword
+        to: keyword
+      - from: createdAt
+        to: created_at
+      - from: updatedAt
+        to: updated_at
+
+source:
+  type: postgres
+  host: postgres
+  port: 5432
+  database: mydatabase
+  user: myuser
+  password: mypassword
+
+# sync:
+#   source:
+#     type: postgres
+#     host: postgres
+#     port: 5432
+#     database: mydatabase
+#     user: myuser
+#     password: mypassword
+#   primary_key: id
